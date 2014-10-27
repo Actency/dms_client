@@ -1,0 +1,49 @@
+<?php
+ /**
+ * Implements hook_menu().
+ */
+function dms_client_menu() {
+  // Report page
+  $items['admin/reports/dms'] = array(
+    'title' => 'DMS Report',
+    'page callback' => 'dms_client_report_callback',
+		'access callback' => TRUE
+  );
+
+	// Module settings.
+  $items['admin/config/system/dms_client/settings'] = array(
+    'title' => 'DMS Client Settings',
+    'page callback' => 'drupal_get_form',
+    'page arguments' => array('dms_client_settings_form'),
+    'file' => 'dms_client.inc',
+		'access callback' => TRUE
+  );
+
+	return $items;
+}	
+
+ /**
+ * menu callback.
+ */
+function dms_client_report_callback() {
+	$response = array(
+		'code' => -1
+	);
+	if (isset($_REQUEST['secret']) && $_REQUEST['secret'] == variable_get('dms_client_secret', dms_client_generateRandomString())) {
+		$response['code'] = 1;
+		$response['core_version'] = VERSION;
+	}
+	drupal_add_http_header('Content-Type', 'application/json');
+	drupal_add_http_header('Access-Control-Allow-Origin', "*");
+	drupal_add_http_header('Access-Control-Allow-Methods', 'GET,POST');
+	echo json_encode($response);
+}
+
+function dms_client_generateRandomString($length = 255) {
+  $characters = '0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ';
+  $randomString = '';
+  for ($i = 0; $i < $length; $i++) {
+    $randomString .= $characters[rand(0, strlen($characters) - 1)];
+  }
+  return $randomString;
+}
