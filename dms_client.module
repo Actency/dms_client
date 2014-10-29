@@ -10,7 +10,7 @@ function dms_client_menu() {
 		'access callback' => TRUE
   );
 
-	// Module settings.
+	// Module settings
   $items['admin/config/system/dms_client/settings'] = array(
     'title' => 'DMS Client Settings',
     'page callback' => 'drupal_get_form',
@@ -18,20 +18,48 @@ function dms_client_menu() {
     'file' => 'dms_client.inc',
 		'access callback' => TRUE
   );
-
+  // Actions
+  $items['admin/dms/action/cron-run'] = array(
+    'title' => 'CRON run from dms call',
+    'page callback' => 'dms_client_cron_run',
+    'access callback' => TRUE
+  );
+  $items['admin/dms/action/cache-clear'] = array(
+    'title' => 'Cache clear from dms call',
+    'page callback' => 'dms_client_cache_clear',
+    'access callback' => TRUE
+  );
 	return $items;
 }	
 
  /**
- * menu callback.
+ * Menu callback
  */
 function dms_client_report_callback() {
 	$response = array(
 		'code' => -1
 	);
-	if (isset($_REQUEST['secret']) && $_REQUEST['secret'] == variable_get('dms_client_secret', dms_client_generateRandomString())) {
+  // Request analysis
+  $params = drupal_get_query_parameters();
+  $req_valid = dms_client_valid_request($params);
+  // Available modes (default: 'light')
+  $arr_modes = array('light', 'full', 'specific');
+  $req_mode = 'light';
+  if (array_key_exists('mode', $params) && in_array($params['mode'], $arr_modes)) {
+    $req_mode = $params['mode'];
+  }
+	if ($req_valid) {
 		$response['code'] = 1;
-		$response['core_version'] = VERSION;
+    $response['system_status'] = dms_client_system_status($req_mode == 'light');
+    if ($req_mode == 'full' || in_array('features', $params['checklist'])) {
+      $response['features'] = dms_client_features_status();
+    }
+    if ($req_mode == 'full' || in_array('statistics', $params['checklist'])) {
+      $response['statistics'] = dms_client_statistics();
+    }
+    if ($req_mode == 'full' || in_array('hack', $params['checklist'])) {
+      $response['hack'] = dms_client_hack_check();
+    }
 	}
 	drupal_add_http_header('Content-Type', 'application/json');
 	drupal_add_http_header('Access-Control-Allow-Origin', "*");
@@ -39,6 +67,40 @@ function dms_client_report_callback() {
 	echo json_encode($response);
 }
 
+/**
+ * Menu callback
+ */
+function dms_client_cron_run() {
+  return array(
+    'code' => drupal_cron_run() ? 1 : -1
+  );
+}
+
+/**
+ * Menu callback
+ */
+function dms_client_cache_clear() {
+  return array(
+    'code' => drupal_flush_all_caches() ? 1 : -1
+);
+}
+
+/**
+ * Menu callback
+ *
+ * @param $params
+ *   Query parameters
+ */
+function dms_client_valid_request($params) {
+  return (array_key_exists('secret', $params) && password_verify(variable_get('dms_client_secret', dms_client_generateRandomString()), $params['secret'])) ? TRUE : FALSE;
+}
+
+/**
+ * Generate a secret
+ *
+ * @param $length
+ *   The length of the generated secret
+ */
 function dms_client_generateRandomString($length = 255) {
   $characters = '0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ';
   $randomString = '';
@@ -46,4 +108,378 @@ function dms_client_generateRandomString($length = 255) {
     $randomString .= $characters[rand(0, strlen($characters) - 1)];
   }
   return $randomString;
+}
+
+/**
+ * System status (see /modules/system/system.admin.inc)
+ *
+ * @param $check
+ *   If true, only returns a boolean whether there are system status errors.
+ */
+function dms_client_system_status($check = FALSE) {
+  // Load .install files
+  include_once DRUPAL_ROOT . '/includes/install.inc';
+  drupal_load_updates();
+
+  // Check run-time requirements and status information.
+  $requirements = module_invoke_all('requirements', 'runtime');
+  usort($requirements, '_system_sort_requirements');
+
+  if ($check) {
+    return drupal_requirements_severity($requirements) == REQUIREMENT_ERROR;
+  }
+  return $requirements;
+}
+
+/**
+ * Updates status (see /modules/update/update.manager.inc)
+ *
+ * @param $check
+ *   If true, only returns a boolean whether there are system status errors.
+ */
+function dms_client_updates_status($check = FALSE) {
+  $available = update_get_available(TRUE);
+  if (empty($available)) {
+    return array('error' => t('There was a problem getting update information. Try again later.'));
+  }
+
+  // This will be a nested array. The first key is the kind of project, which
+  // can be either 'enabled', 'disabled', 'manual' (projects which require
+  // manual updates, such as core). Then, each subarray is an array of
+  // projects of that type, indexed by project short name, and containing an
+  // array of data for cells in that project's row in the appropriate table.
+  $projects = array();
+
+  module_load_include('inc', 'update', 'update.compare');
+  $project_data = update_calculate_project_data($available);
+
+  foreach ($project_data as $name => $project) {
+    // Filter out projects which are up to date already.
+    if ($project['status'] == UPDATE_CURRENT) {
+      continue;
+    }
+    // The project name to display can vary based on the info we have.
+    if (!empty($project['title'])) {
+      if (!empty($project['link'])) {
+        $project_name = l($project['title'], $project['link']);
+      }
+      else {
+        $project_name = check_plain($project['title']);
+      }
+    }
+    elseif (!empty($project['info']['name'])) {
+      $project_name = check_plain($project['info']['name']);
+    }
+    else {
+      $project_name = check_plain($name);
+    }
+    if ($project['project_type'] == 'theme' || $project['project_type'] == 'theme-disabled') {
+      $project_name .= ' ' . t('(Theme)');
+    }
+
+    if (empty($project['recommended'])) {
+      // If we don't know what to recommend they upgrade to, we should skip
+      // the project entirely.
+      continue;
+    }
+
+    $recommended_release = $project['releases'][$project['recommended']];
+    $recommended_version = $recommended_release['version'] . ' ' . l(t('(Release notes)'), $recommended_release['release_link'], array('attributes' => array('title' => t('Release notes for @project_title', array('@project_title' => $project['title'])))));
+    if ($recommended_release['version_major'] != $project['existing_major']) {
+      $recommended_version .= '<div title="Major upgrade warning" class="update-major-version-warning">' . t('This update is a major version update which means that it may not be backwards compatible with your currently running version.  It is recommended that you read the release notes and proceed at your own risk.') . '</div>';
+    }
+
+    // Create an entry for this project.
+    $entry = array(
+      'title' => $project_name,
+      'installed_version' => $project['existing_version'],
+      'recommended_version' => $recommended_version,
+    );
+
+    switch ($project['status']) {
+      case UPDATE_NOT_SECURE:
+      case UPDATE_REVOKED:
+        $entry['title'] .= ' ' . t('(Security update)');
+        $entry['#weight'] = -2;
+        $type = 'security';
+        break;
+
+      case UPDATE_NOT_SUPPORTED:
+        $type = 'unsupported';
+        $entry['title'] .= ' ' . t('(Unsupported)');
+        $entry['#weight'] = -1;
+        break;
+
+      case UPDATE_UNKNOWN:
+      case UPDATE_NOT_FETCHED:
+      case UPDATE_NOT_CHECKED:
+      case UPDATE_NOT_CURRENT:
+        $type = 'recommended';
+        break;
+
+      default:
+        // Jump out of the switch and onto the next project in foreach.
+        continue 2;
+    }
+
+    // Drupal core needs to be upgraded manually.
+    $needs_manual = $project['project_type'] == 'core';
+
+    if ($needs_manual) {
+      // There are no checkboxes in the 'Manual updates' table so it will be
+      // rendered by theme('table'), not theme('tableselect'). Since the data
+      // formats are incompatible, we convert now to the format expected by
+      // theme('table').
+      unset($entry['#weight']);
+      $attributes = $entry['#attributes'];
+      unset($entry['#attributes']);
+      $entry = array(
+          'data' => $entry,
+        ) + $attributes;
+    }
+    else {
+      $form['project_downloads'][$name] = array(
+        '#type' => 'value',
+        '#value' => $recommended_release['download_link'],
+      );
+    }
+
+    // Based on what kind of project this is, save the entry into the
+    // appropriate subarray.
+    switch ($project['project_type']) {
+      case 'core':
+        // Core needs manual updates at this time.
+        $projects['manual'][$name] = $entry;
+        break;
+
+      case 'module':
+      case 'theme':
+        $projects['enabled'][$name] = $entry;
+        break;
+
+      case 'module-disabled':
+      case 'theme-disabled':
+        $projects['disabled'][$name] = $entry;
+        break;
+    }
+  }
+
+  if (empty($projects)) {
+    return array('uptodate' => t('All of your projects are up to date.'));
+  }
+  return $projects;
+}
+
+/**
+ * Features status (see /sites/all/modules/contrib/features/features.admin.inc)
+ */
+function dms_client_features_status() {
+  if (!module_exists('features')) {
+    return array('error' => t('The features module is not enabled.'));
+  }
+  // Load export functions to use in comparison.
+  module_load_include('inc', 'features', 'features.export');
+
+  // Clear & rebuild key caches
+  features_get_info(NULL, NULL, TRUE);
+  features_rebuild();
+
+  $modules = array_filter(features_get_modules(), 'features_filter_hidden');
+  $features = array_filter(features_get_features(), 'features_filter_hidden');
+  $conflicts = features_get_conflicts();
+
+  foreach ($modules as $key => $module) {
+    if ($module->status && !empty($module->info['dependencies'])) {
+      foreach ($module->info['dependencies'] as $dependent) {
+        if (isset($features[$dependent])) {
+          $features[$dependent]->dependents[$key] = $module->info['name'];
+        }
+      }
+    }
+  }
+
+  if ( empty($features) ) {
+    return array('nofeatures' => t('No Features were found.'));
+  }
+
+  $form = array('#features' => $features);
+
+  // Generate features form. Features are sorted by dependencies, resort alpha
+  ksort($features);
+  foreach ($features as $name => $module) {
+    $package_title = !empty($module->info['package']) ? $module->info['package'] : t('Other');
+    $package = strtolower(preg_replace('/[^a-zA-Z0-9-]+/', '-', $package_title));
+
+    // Set up package elements
+    if (!isset($form[$package])) {
+      $form[$package] = array(
+        '#tree' => FALSE,
+        '#title' => check_plain($package_title),
+        '#theme' => 'features_form_package',
+        '#type' => 'fieldset',
+        '#group' => 'packages',
+      );
+      $form[$package]['links'] =
+      $form[$package]['version'] =
+      $form[$package]['weight'] =
+      $form[$package]['status'] =
+      $form[$package]['action'] = array('#tree' => TRUE);
+    }
+
+    $disabled = FALSE;
+    $description = isset($module->info['description']) ? check_plain($module->info['description']) : '';
+
+    // Detect unmet dependencies
+    if (!empty($module->info['dependencies'])) {
+      $unmet_dependencies = array();
+      $dependencies = _features_export_maximize_dependencies($module->info['dependencies']);
+      foreach ($dependencies as $dependency) {
+        if (empty($modules[$dependency])) {
+          $unmet_dependencies[] = theme('features_module_status', array('status' => FEATURES_MODULE_MISSING, 'module' => $dependency));
+        }
+      }
+      if (!empty($unmet_dependencies)) {
+        $description .= "<div class='dependencies'>" . t('Unmet dependencies: !dependencies', array('!dependencies' => implode(', ', $unmet_dependencies))) . "</div>";
+        $disabled = TRUE;
+      }
+    }
+
+    if (!empty($module->dependents)) {
+      $disabled = TRUE;
+      $description .= "<div class='requirements'>". t('Required by: !dependents', array('!dependents' => implode(', ', $module->dependents))) ."</div>";
+    }
+
+    // Detect potential conflicts
+    if (!empty($conflicts[$name])) {
+      $module_conflicts = array();
+      foreach ($conflicts[$name] as $conflict => $components) {
+        $component_strings = array();
+        foreach ($components as $component => $component_conflicts) {
+          $component_strings[] = t('@component [@items]', array('@component' => $component, '@items' => implode(', ', $component_conflicts)));
+        }
+        $component_strings = implode(', ', $component_strings);
+        // If conflicting module is disabled, indicate so in feature listing
+        $status = !module_exists($conflict) ? FEATURES_MODULE_DISABLED : FEATURES_MODULE_CONFLICT;
+        $module_conflicts[] = theme('features_module_status', array('status' => $status, 'module' => $conflict)) . t(' in ') . $component_strings;
+        // Only disable modules with conflicts if they are not already enabled.
+        // If they are already enabled, somehow the user got themselves into a
+        // bad situation and they need to be able to disable a conflicted module.
+        if (module_exists($conflict) && !module_exists($name)) {
+          $disabled = TRUE;
+        }
+      }
+      $description .= "<div class='conflicts'>". t('Conflicts with: !conflicts', array('!conflicts' => implode(', ', $module_conflicts))) ."</div>";
+    }
+
+    $href = "admin/structure/features/{$name}";
+    $module_name = (user_access('administer features')) ? l($module->info['name'], $href) : $module->info['name'];
+    $form[$package]['status'][$name] = array(
+      '#type' => 'checkbox',
+      '#title' => $module_name,
+      '#description' => $description,
+      '#default_value' => $module->status,
+      '#disabled' => $disabled,
+    );
+
+    if (!empty($module->info['project status url'])) {
+      $uri = l(truncate_utf8($module->info['project status url'], 35, TRUE, TRUE), $module->info['project status url']);
+    }
+    else if (isset($module->info['project'], $module->info['version'], $module->info['datestamp'])) {
+      $uri = l('http://drupal.org', 'http://drupal.org/project/' . $module->info['project']);
+    }
+    else {
+      $uri = t('Unavailable');
+    }
+    $version = !empty($module->info['version']) ? $module->info['version'] : '';
+    $version = !empty($version) ? "<div class='description'>$version</div>" : '';
+    $form[$package]['sign'][$name] = array('#markup' => "{$uri} {$version}");
+
+    if (user_access('administer features')) {
+      // Add status link
+      if ($module->status) {
+        $state = theme('features_storage_link', array('storage' => FEATURES_CHECKING, 'path' => $href));
+        $state .= l(t('Check'), "admin/structure/features/{$name}/status", array('attributes' => array('class' => array('admin-check'))));
+        $state .= theme('features_storage_link', array('storage' => FEATURES_REBUILDING, 'path' => $href));
+        $state .= theme('features_storage_link', array('storage' => FEATURES_NEEDS_REVIEW, 'path' =>  $href));
+        $state .= theme('features_storage_link', array('storage' => FEATURES_OVERRIDDEN, 'path' =>  $href));
+        $state .= theme('features_storage_link', array('storage' => FEATURES_DEFAULT, 'path' =>  $href));
+      }
+      elseif (!empty($conflicts[$name])) {
+        $state = theme('features_storage_link', array('storage' => FEATURES_CONFLICT, 'path' => $href));
+      }
+      else {
+        $state = theme('features_storage_link', array('storage' => FEATURES_DISABLED, 'path' => $href));
+      }
+      $form[$package]['state'][$name] = array(
+        '#markup' => !empty($state) ? $state : '',
+      );
+
+      // Add in recreate link
+      $form[$package]['actions'][$name] = array(
+        '#markup' => l(t('Recreate'), "admin/structure/features/{$name}/recreate", array('attributes' => array('class' => array('admin-update')))),
+      );
+    }
+  }
+  ksort($form);
+
+  // As of 7.0 beta 2 it matters where the "vertical_tabs" element lives on the
+  // the array. We add it late, but at the beginning of the array because that
+  // keeps us away from trouble.
+  $form = array('packages' => array('#type' => 'vertical_tabs')) + $form;
+
+  return $form;
+}
+
+/**
+ * Statistics (users count, nodes count, lang, etc.)
+ */
+function dms_client_statistics() {
+  // Lang
+  $statistics['lang'] = language_list('enabled');
+  // Users count
+  $statistics['users'] = db_query("SELECT COUNT(uid) FROM {users}")->countQuery()->execute()->fetchField();
+  // Nodes count
+  $statistics['nodes']['published'] = db_query("SELECT COUNT(nid) FROM {node} WHERE status = :status", array(':status' => 1))->countQuery()->execute()->fetchField();
+  $statistics['nodes']['unpublished'] = db_query("SELECT COUNT(nid) FROM {node} WHERE status = :status", array(':status' => 0))->countQuery()->execute()->fetchField();
+  return $statistics;
+}
+
+/**
+ * Hack status (based on MD5check module)
+ */
+function dms_client_hack_check()
+{
+  if (!module_exists('md5check')) {
+    return array('error' => t('The md5check module is not enabled.'));
+  }
+  $hack = array('code' => 1);
+  // Fetches an array of all active modules and looping through them
+  $modules = module_list(TRUE, FALSE);
+  foreach ($modules as $moduleName) {
+    // Loads the module data from database
+    $module = md5check_get_values_for_module($moduleName);
+    // Creates a md5 hash of the modules files
+    $md5 = md5check_calculate_md5_value_for_module($module);
+
+    // If the existing module md5 hash isn't null (as never runned before) we'll check if it has changed
+    // else we'll just store the new value
+    if ($module->md5check !== NULL) {
+      if ($md5 != $module->md5check) {
+        // The value has changed as in a files content has changed - we'll report this
+        watchdog('security',
+          t('Security issue. Module @moduleName has changed.', array('@moduleName' => $moduleName)),
+          array(),
+          WATCHDOG_CRITICAL
+        );
+        $hack['modules'][] = $moduleName;
+        // and stores the new value so we won't report the same change again
+        md5check_setMD5value($module->filename, $md5);
+      }
+    }
+    else {
+      // Existing value is null - new value will be stored
+      md5check_setMD5value($module->filename, $md5);
+    }
+  }
+  return $hack;
 }

@@ -2,5 +2,5 @@ name = DMS Client
 description = "Client module to send site health reports to DMS"
 package = Actency
 core = 7.x
-configure = admin/config/system/dms_client/setting
+configure = admin/config/system/dms_client/settings
 version = 7.x-1.0
