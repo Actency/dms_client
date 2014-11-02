@@ -110,7 +110,7 @@ function dms_client_valid_request($params) {
  *   The hash to match
  */
 function dms_client_password_verify($pass, $hash) {
-	$expected  = crypt($pass, CRYPT_SHA256);
+	$expected  = crypt($pass, $pass);
   return $expected == $hash;
 }
 
@@ -238,9 +238,12 @@ function dms_client_updates_status($check = FALSE) {
         // Jump out of the switch and onto the next project in foreach.
         continue 2;
     }
-		
-		$entry['type'] = $type;
-		$projects[$name] = $entry;
+		if ($name != 'drupal') {
+			$projects[$type][$name] = $entry;
+		} else {
+			$entry['type'] = $type;
+			$projects[$name] = $entry;
+		}
   }
 
   if (empty($projects)) {
