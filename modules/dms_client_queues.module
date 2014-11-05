@@ -1,0 +1,15 @@
+<?php
+/**
+ * Implements hook_dms_get_report().
+ */
+function dms_client_dms_get_report(&$response) {
+  // Get all queues names and count.
+  $queues = db_query('SELECT name, COUNT(name) AS count FROM {queue} GROUP BY name');  
+  
+  // Add the queues to the response.
+  foreach($queues as $queue){
+    $response['queues'][$queue->name]['count'] = $queue->count;
+  }
+  
+  /* @todo: process vbo and batch queues appart as they are special types of queues. */
+}
