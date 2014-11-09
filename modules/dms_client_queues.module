@@ -2,14 +2,84 @@
 /**
  * Implements hook_dms_get_report().
  */
-function dms_client_dms_get_report(&$response) {
+function dms_client_queues_dms_get_report(&$response) {
   // Get all queues names and count.
-  $queues = db_query('SELECT name, COUNT(name) AS count FROM {queue} GROUP BY name');  
-  
+  $queues = db_query('SELECT name, COUNT(name) AS count FROM {queue} GROUP BY name');
+
   // Add the queues to the response.
   foreach($queues as $queue){
     $response['queues'][$queue->name]['count'] = $queue->count;
   }
-  
+
   /* @todo: process vbo and batch queues appart as they are special types of queues. */
+}
+
+/**
+ * Implements hook_form_FORM_ID_alter().
+ */
+function dms_client_queues_form_dms_client_settings_form_alter(&$form, &$form_state, $form_id){
+  //variable_set('queue_class_bportal_mapping_engine_force_match', 'MappingEngineQueue');
+
+  $form['#submit'][] = 'dms_client_queues_settings_form_submit';
+  $form['dms_client_queues'] = array(
+    '#type' => 'fieldset',
+    '#title' => t('Queues'),
+    '#description' => t('Queues specific configuration for DMS.'),
+    '#collapsible' => 'TRUE',
+    '#collapsed' => 'TRUE',
+  );
+
+  // Catch every defined classes for the queues to allow the user to choose the ones that should be extended.
+  // We don't catch MemoryQueue class items as it should be processed in a single page request.
+  $options = array(
+    'queue_default_class' => t('Default system queue (!class)', array('!class' => variable_get('queue_default_class', 'SystemQueue'))),
+    'queue_default_reliable_class' => t('Default reliable system queue (!class)', array('!class' => variable_get('queue_default_reliable_class', 'SystemQueue'))),
+  );
+  $queue_types = db_query('SELECT DISTINCT name,value FROM {variable} WHERE name LIKE :name', array(':name' => 'queue_class_%'));
+  foreach($queue_types as $class) {
+    $options[$class->name] = unserialize($class->value);
+  }
+
+  $form['dms_client_queues']['dms_client_queues_classes_extended'] = array(
+    '#type' => 'checkboxes',
+    '#title' => t('Defined queue types'),
+    '#description' => t('Select which queue classes should be extended to log additional reports.'),
+    '#options' => $options,
+    '#default_value' => variable_get('dms_client_queues_classes_extended', array()),
+  );
+}
+
+/**
+ * DMS client queues settings form submit.
+ */
+function dms_client_queues_settings_form_submit($form, &$form_state){
+  //drupal_set_message(print_r($form_state, TRUE));
+  foreach($form_state['values']['dms_client_queues_classes_extended'] as $key => $value) {
+    $class = variable_get($key);
+    drupal_set_message($value);
+    drupal_set_message($form_state['complete form']['dms_client_queues']['dms_client_queues_classes_extended']['#default_value'][$key]);
+    // Delete existing extensions that are not extended anymore or set their value back to default for default system queues.
+    if ($value == 0 && $form_state['complete form']['dms_client_queues']['dms_client_queues_classes_extended']['#default_value'][$key] != 0) {
+      switch($key) {
+        case 'queue_default_class' :
+        case 'queue_default_reliable_class' :
+          variable_set($key, 'SystemQueue');
+          break;
+        default :
+          variable_del($key);
+          break;
+      }
+      // Remove DMS client queues reference to the original queue class.
+      variable_del('dms_client_queues_'. $key);
+      drupal_set_message(t('!class queue has been successfully unextended.', array('!class' => $class)));
+    }
+    else if ($value != 0) {
+      // Store the original queue class for later use.
+      variable_set('dms_client_queues_'. $key, $class);
+
+      // Set the queue class to DMS client queues class.
+      variable_set($key, 'DmsClientQueue');
+      drupal_set_message(t('!class queue has been successfully extended.', array('!class' => $class)));
+    }
+  }
 }

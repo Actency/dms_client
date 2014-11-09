@@ -2,4 +2,5 @@ name = DMS Client Queues
 description = "Client module to send site health reports to DMS about the queues"
 package = Actency
 core = 7.x
+configure = admin/config/system/dms_client/settings
 version = 7.x-1.0
