@@ -268,15 +268,46 @@ function dms_client_features_status() {
     return array('error' => t('The features module is not enabled.'));
   }
 
-  $features = features_get_features();
+  module_load_include('inc', 'features', 'features.export');
 
-  if ( empty($features) ) {
-    return array('nofeatures' => t('No Features were found.'));
+  // Sort the Features list before compiling the output.
+  $features = features_get_features();
+  ksort($features);
+
+  foreach ($features as $k => $m) {
+	  $storage = $feature_key = null;
+    switch (features_get_storage($m->name)) {
+      case FEATURES_DEFAULT:
+        $feature_key = 'default';
+        $storage = '';
+        break;
+      case FEATURES_REBUILDABLE:
+        $feature_key = 'rebuildable';
+        $storage = '';
+        break;
+      case FEATURES_OVERRIDDEN:
+        $feature_key = 'overridden';
+        $storage = 'Overridden';
+        break;
+      case FEATURES_NEEDS_REVIEW:
+        $feature_key = 'need_review';
+        $storage = 'Need review';
+        break;
+    }
+    $feature_status = $m->status ? 'enabled' : 'disabled';
+    $rows[$feature_status][$feature_key][] = array(
+      $m->name,
+      $m->info['name'],
+      ucfirst($feature_status),
+      $m->info['version'],
+      $storage
+    );
   }
 
-  $form = array('#features' => $features);
-
-  return $form;
+  if (empty($rows)) {
+    return array('nofeatures' => t('No Features were found.'));
+  }
+  return $rows;
 }
 
 /**
