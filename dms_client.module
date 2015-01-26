@@ -165,6 +165,7 @@ function dms_client_system_status($check = FALSE) {
  *   If true, only returns a boolean whether there are system status errors.
  */
 function dms_client_updates_status($check = FALSE) {
+	module_load_include('module', 'update', 'update');
   $available = update_get_available(TRUE);
   if (empty($available)) {
     return array('error' => t('There was a problem getting update information. Try again later.'));
