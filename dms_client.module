@@ -295,12 +295,10 @@ function dms_client_features_status() {
         break;
     }
     $feature_status = $m->status ? 'enabled' : 'disabled';
-    $rows[$feature_status][$feature_key][] = array(
-      $m->name,
-      $m->info['name'],
-      ucfirst($feature_status),
-      $m->info['version'],
-      $storage
+    $rows[$feature_status][$feature_key][$m->name] = array(
+      'name' => $m->info['name'],
+      'version' => $m->info['version'],
+      'storage' => $storage
     );
   }
 
