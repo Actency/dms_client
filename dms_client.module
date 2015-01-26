@@ -294,12 +294,20 @@ function dms_client_features_status() {
         $storage = 'Need review';
         break;
     }
-    $feature_status = $m->status ? 'enabled' : 'disabled';
-    $rows[$feature_status][$feature_key][$m->name] = array(
-      'name' => $m->info['name'],
-      'version' => $m->info['version'],
-      'storage' => $storage
-    );
+    if ($m->status) {
+	    $rows['enabled'][$feature_key][$m->name] = array(
+	      'name' => $m->info['name'],
+	      'version' => $m->info['version'],
+	      'storage' => $storage
+	    );
+    }
+    else {
+	    $rows['disabled'][$m->name] = array(
+	      'name' => $m->info['name'],
+	      'version' => $m->info['version'],
+	      'storage' => $storage
+	    );
+    }
   }
 
   if (empty($rows)) {
