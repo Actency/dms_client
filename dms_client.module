@@ -365,14 +365,7 @@ function dms_client_hack_check() {
     if ($module->md5check !== NULL) {
       if ($md5 != $module->md5check) {
         // The value has changed as in a files content has changed - we'll report this
-        watchdog('security',
-          t('Security issue. Module @moduleName has changed.', array('@moduleName' => $moduleName)),
-          array(),
-          WATCHDOG_CRITICAL
-        );
         $hack['modules'][] = $moduleName;
-        // and stores the new value so we won't report the same change again
-        md5check_setMD5value($module->filename, $md5);
       }
     }
     else {
