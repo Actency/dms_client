@@ -355,22 +355,27 @@ function dms_client_hack_check() {
   // Fetches an array of all active modules and looping through them
   $modules = module_list(TRUE, FALSE);
   foreach ($modules as $moduleName) {
-    // Loads the module data from database
-    $module = md5check_get_values_for_module($moduleName);
-    // Creates a md5 hash of the modules files
-    $md5 = md5check_calculate_md5_value_for_module($module);
+    $modulePath = drupal_get_path('module', $moduleName);
 
-    // If the existing module md5 hash isn't null (as never runned before) we'll check if it has changed
-    // else we'll just store the new value
-    if ($module->md5check !== NULL) {
-      if ($md5 != $module->md5check) {
-        // The value has changed as in a files content has changed - we'll report this
-        $hack['modules'][] = $moduleName;
+    // Don't check customs
+    if (strpos($modulePath, 'modules/features') === FALSE && strpos($modulePath, 'modules/custom') === FALSE) {
+      // Loads the module data from database
+      $module = md5check_get_values_for_module($moduleName);
+      // Creates a md5 hash of the modules files
+      $md5 = md5check_calculate_md5_value_for_module($module);
+
+      // If the existing module md5 hash isn't null (as never runned before) we'll check if it has changed
+      // else we'll just store the new value
+      if ($module->md5check !== NULL) {
+        if ($md5 != $module->md5check) {
+          // The value has changed as in a files content has changed - we'll report this
+          $hack['modules'][] = $moduleName;
+        }
       }
-    }
-    else {
-      // Existing value is null - new value will be stored
-      md5check_setMD5value($module->filename, $md5);
+      else {
+        // Existing value is null - new value will be stored
+        md5check_setMD5value($module->filename, $md5);
+      }
     }
   }
   return $hack;
