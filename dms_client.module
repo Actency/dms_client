@@ -65,6 +65,9 @@ function dms_client_report_callback() {
     if ($req_mode == 'full' || in_array('hack', $params['checklist'])) {
       $response['hack'] = dms_client_hack_check();
     }
+    if ($req_mode == 'full' || in_array('logs', $params['checklist'])) {
+      $response['logs'] = dms_client_logs_check();
+    }
   }
 
   // Call every module that implement hook_dms_get_report() to populate the output.
@@ -379,4 +382,30 @@ function dms_client_hack_check() {
     }
   }
   return $hack;
+}
+
+
+/**
+ * Logs status (daily counter by severity)
+ */
+function dms_client_logs_check() {
+  $logs = array();
+  $logs_status = array(
+    'danger'  => array(WATCHDOG_ALERT, WATCHDOG_CRITICAL, WATCHDOG_EMERGENCY),
+    'warning' => array(WATCHDOG_ERROR, WATCHDOG_WARNING),
+    'info'    => array(WATCHDOG_NOTICE, WATCHDOG_DEBUG, WATCHDOG_INFO)
+  );
+
+  $thisMorning = strtotime('today midnight');
+
+  foreach ($logs_status as $status => $severities) {
+    $query = db_select('watchdog', 'w')
+      ->condition('w.timestamp', $thisMorning, '>')
+      ->condition('w.severity', $severities, 'IN')
+      ->fields('w', array('wid'));
+
+    $logs[$status] = $query->countQuery()->execute()->fetchField();
+  }
+  
+  return $logs;
 }
