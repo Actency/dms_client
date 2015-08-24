@@ -2,7 +2,7 @@
 /**
  * Implements hook_dms_get_report().
  */
-function dms_client_queues_dms_get_report(&$response) {
+function queues_dms_client_report(&$response) {
   // Get all queues names and count.
   $queues = db_query('SELECT name, COUNT(name) AS count FROM {queue} GROUP BY name');
 
