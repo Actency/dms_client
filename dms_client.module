@@ -160,8 +160,22 @@ function dms_client_system_status($check = FALSE) {
 
 
 
-function dms_client_get_plugins() {
-	return array('features', 'hack', 'queues', 'statistics', 'updates');
+function dms_client_get_plugins($module = 'dms_client', $dir = 'includes') {
+  //	return array('features', 'hack', 'queues', 'statistics', 'updates');
+	global $plugins;
+	
+	if (!empty($plugins)) return $plugins;
+	else $plugins = array();
+	
+  $dir = '/' . ($dir ? $dir . '/' : '');
+	
+	$files = scandir(DRUPAL_ROOT . '/' . drupal_get_path('module', $module).$dir);
+	
+	foreach($files as $file) {
+		if (preg_match('/(?<plugin>.+).inc/', $file, $matches)) $plugins[]=$matches['plugin'];
+	}
+	
+	return $plugins;
 }
 
 function dms_client_include($file, $module = 'dms_client', $dir = 'includes') {
