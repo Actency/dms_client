@@ -1,5 +1,5 @@
 <?php
- /**
+/**
  * Implements hook_menu().
  */
 function dms_client_menu() {
@@ -7,40 +7,40 @@ function dms_client_menu() {
   $items['admin/reports/dms'] = array(
     'title' => 'DMS Report',
     'page callback' => 'dms_client_report_callback',
-		'access callback' => TRUE
+    'access callback' => TRUE
   );
 
-	// Module settings
+  // Module settings
   $items['admin/config/system/dms_client/settings'] = array(
     'title' => 'DMS Client Settings',
     'page callback' => 'drupal_get_form',
     'page arguments' => array('dms_client_settings_form'),
     'file' => 'dms_client.inc',
-		'access callback' => TRUE
+    'access callback' => TRUE
   );
   // Actions
   $items['dms-action/cron-run'] = array(
     'title' => 'CRON run from dms call',
     'page callback' => 'dms_client_cron_run',
     'access callback' => TRUE,
-		'type' => MENU_CALLBACK
+    'type' => MENU_CALLBACK
   );
   $items['dms-action/cache-clear'] = array(
     'title' => 'Cache clear from dms call',
     'page callback' => 'dms_client_cache_clear',
     'access callback' => TRUE,
-		'type' => MENU_CALLBACK
+    'type' => MENU_CALLBACK
   );
-	return $items;
-}	
+  return $items;
+}
 
- /**
+/**
  * Menu callback
  */
 function dms_client_report_callback() {
-	$response = array(
-		'code' => -1
-	);
+  $response = array(
+    'code' => -1
+  );
   // Request analysis
   $params = drupal_get_query_parameters();
   $req_valid = dms_client_valid_request($params);
@@ -50,10 +50,10 @@ function dms_client_report_callback() {
   if (array_key_exists('mode', $params) && in_array($params['mode'], $arr_modes)) {
     $req_mode = $params['mode'];
   }
-	if ($req_valid) {
-		$response['code'] = 1;
+  if ($req_valid) {
+    $response['code'] = 1;
     $response['system_status'] = dms_client_system_status($req_mode == 'light');
-		if ($req_mode == 'full' || in_array('updates', $params['checklist'])) {
+    if ($req_mode == 'full' || in_array('updates', $params['checklist'])) {
       $response['updates'] = dms_client_updates_status();
     }
     if ($req_mode == 'full' || in_array('features', $params['checklist'])) {
@@ -65,19 +65,22 @@ function dms_client_report_callback() {
     if ($req_mode == 'full' || in_array('hack', $params['checklist'])) {
       $response['hack'] = dms_client_hack_check();
     }
-	}
-  
+    if ($req_mode == 'full' || in_array('logs', $params['checklist'])) {
+      $response['logs'] = dms_client_logs_check();
+    }
+  }
+
   // Call every module that implement hook_dms_get_report() to populate the output.
   // We do not use module_invoke_all() to be able to use variable by reference.
   foreach (module_implements('dms_get_report') as $module) {
     $function = $module . '_dms_get_report';
     $function($response);
   }
-  
-	drupal_add_http_header('Content-Type', 'application/json');
-	drupal_add_http_header('Access-Control-Allow-Origin', "*");
-	drupal_add_http_header('Access-Control-Allow-Methods', 'GET,POST');
-	echo json_encode($response);
+
+  drupal_add_http_header('Content-Type', 'application/json');
+  drupal_add_http_header('Access-Control-Allow-Origin', "*");
+  drupal_add_http_header('Access-Control-Allow-Methods', 'GET,POST');
+  echo json_encode($response);
 }
 
 /**
@@ -95,7 +98,7 @@ function dms_client_cron_run() {
 function dms_client_cache_clear() {
   return array(
     'code' => drupal_flush_all_caches() ? 1 : -1
-);
+  );
 }
 
 /**
@@ -105,7 +108,7 @@ function dms_client_cache_clear() {
  *   Query parameters
  */
 function dms_client_valid_request($params) {
-	// If php >= 5.5 we can use password_verify()
+  // If php >= 5.5 we can use password_verify()
   return (array_key_exists('secret', $params) && dms_client_password_verify(variable_get('dms_client_secret', dms_client_generateRandomString()), $params['secret'])) ? TRUE : FALSE;
 }
 
@@ -118,7 +121,7 @@ function dms_client_valid_request($params) {
  *   The hash to match
  */
 function dms_client_password_verify($pass, $hash) {
-	$expected  = crypt($pass, $pass);
+  $expected = crypt($pass, $pass);
   return $expected == $hash;
 }
 
@@ -165,6 +168,7 @@ function dms_client_system_status($check = FALSE) {
  *   If true, only returns a boolean whether there are system status errors.
  */
 function dms_client_updates_status($check = FALSE) {
+  module_load_include('module', 'update', 'update');
   $available = update_get_available(TRUE);
   if (empty($available)) {
     return array('error' => t('There was a problem getting update information. Try again later.'));
@@ -246,12 +250,13 @@ function dms_client_updates_status($check = FALSE) {
         // Jump out of the switch and onto the next project in foreach.
         continue 2;
     }
-		if ($name != 'drupal') {
-			$projects[$type][$name] = $entry;
-		} else {
-			$entry['type'] = $type;
-			$projects[$name] = $entry;
-		}
+    if ($name != 'drupal') {
+      $projects[$type][$name] = $entry;
+    }
+    else {
+      $entry['type'] = $type;
+      $projects[$name] = $entry;
+    }
   }
 
   if (empty($projects)) {
@@ -268,15 +273,52 @@ function dms_client_features_status() {
     return array('error' => t('The features module is not enabled.'));
   }
 
-  $features = features_get_features();
+  module_load_include('inc', 'features', 'features.export');
 
-  if ( empty($features) ) {
-    return array('nofeatures' => t('No Features were found.'));
+  // Sort the Features list before compiling the output.
+  $features = features_get_features();
+  ksort($features);
+
+  foreach ($features as $k => $m) {
+    $storage = $feature_key = NULL;
+    switch (features_get_storage($m->name)) {
+      case FEATURES_DEFAULT:
+        $feature_key = 'default';
+        $storage = '';
+        break;
+      case FEATURES_REBUILDABLE:
+        $feature_key = 'rebuildable';
+        $storage = '';
+        break;
+      case FEATURES_OVERRIDDEN:
+        $feature_key = 'overridden';
+        $storage = 'Overridden';
+        break;
+      case FEATURES_NEEDS_REVIEW:
+        $feature_key = 'need_review';
+        $storage = 'Need review';
+        break;
+    }
+    if ($m->status) {
+      $rows['enabled'][$feature_key][$m->name] = array(
+        'name' => $m->info['name'],
+        'version' => $m->info['version'],
+        'storage' => $storage
+      );
+    }
+    else {
+      $rows['disabled'][$m->name] = array(
+        'name' => $m->info['name'],
+        'version' => $m->info['version'],
+        'storage' => $storage
+      );
+    }
   }
 
-  $form = array('#features' => $features);
-
-  return $form;
+  if (empty($rows)) {
+    return array('nofeatures' => t('No Features were found.'));
+  }
+  return $rows;
 }
 
 /**
@@ -285,20 +327,30 @@ function dms_client_features_status() {
 function dms_client_statistics() {
   // Lang
   $statistics['languages'] = language_list('enabled');
-	$statistics['language_default'] = language_default();
+  $statistics['language_default'] = language_default();
   // Users count
-  $statistics['users'] = db_select('users', 'u')->countQuery()->execute()->fetchField();
+  $statistics['users'] = db_select('users', 'u')
+    ->countQuery()
+    ->execute()
+    ->fetchField();
   // Nodes count
-  $statistics['nodes']['published'] = db_select('node', 'n')->condition('n.status', 1)->countQuery()->execute()->fetchField();
-  $statistics['nodes']['unpublished'] = db_select('node', 'n')->condition('n.status', 0)->countQuery()->execute()->fetchField();
+  $statistics['nodes']['published'] = db_select('node', 'n')
+    ->condition('n.status', 1)
+    ->countQuery()
+    ->execute()
+    ->fetchField();
+  $statistics['nodes']['unpublished'] = db_select('node', 'n')
+    ->condition('n.status', 0)
+    ->countQuery()
+    ->execute()
+    ->fetchField();
   return $statistics;
 }
 
 /**
  * Hack status (based on MD5check module)
  */
-function dms_client_hack_check()
-{
+function dms_client_hack_check() {
   if (!module_exists('md5check')) {
     return array('error' => t('The md5check module is not enabled.'));
   }
@@ -306,30 +358,54 @@ function dms_client_hack_check()
   // Fetches an array of all active modules and looping through them
   $modules = module_list(TRUE, FALSE);
   foreach ($modules as $moduleName) {
-    // Loads the module data from database
-    $module = md5check_get_values_for_module($moduleName);
-    // Creates a md5 hash of the modules files
-    $md5 = md5check_calculate_md5_value_for_module($module);
+    $modulePath = drupal_get_path('module', $moduleName);
 
-    // If the existing module md5 hash isn't null (as never runned before) we'll check if it has changed
-    // else we'll just store the new value
-    if ($module->md5check !== NULL) {
-      if ($md5 != $module->md5check) {
-        // The value has changed as in a files content has changed - we'll report this
-        watchdog('security',
-          t('Security issue. Module @moduleName has changed.', array('@moduleName' => $moduleName)),
-          array(),
-          WATCHDOG_CRITICAL
-        );
-        $hack['modules'][] = $moduleName;
-        // and stores the new value so we won't report the same change again
+    // Don't check customs
+    if (strpos($modulePath, 'modules/features') === FALSE && strpos($modulePath, 'modules/custom') === FALSE) {
+      // Loads the module data from database
+      $module = md5check_get_values_for_module($moduleName);
+      // Creates a md5 hash of the modules files
+      $md5 = md5check_calculate_md5_value_for_module($module);
+
+      // If the existing module md5 hash isn't null (as never runned before) we'll check if it has changed
+      // else we'll just store the new value
+      if ($module->md5check !== NULL) {
+        if ($md5 != $module->md5check) {
+          // The value has changed as in a files content has changed - we'll report this
+          $hack['modules'][] = $moduleName;
+        }
+      }
+      else {
+        // Existing value is null - new value will be stored
         md5check_setMD5value($module->filename, $md5);
       }
     }
-    else {
-      // Existing value is null - new value will be stored
-      md5check_setMD5value($module->filename, $md5);
-    }
   }
   return $hack;
+}
+
+
+/**
+ * Logs status (daily counter by severity)
+ */
+function dms_client_logs_check() {
+  $logs = array();
+  $logs_status = array(
+    'danger'  => array(WATCHDOG_ALERT, WATCHDOG_CRITICAL, WATCHDOG_EMERGENCY),
+    'warning' => array(WATCHDOG_ERROR, WATCHDOG_WARNING),
+    'info'    => array(WATCHDOG_NOTICE, WATCHDOG_DEBUG, WATCHDOG_INFO)
+  );
+
+  $thisMorning = strtotime('today midnight');
+
+  foreach ($logs_status as $status => $severities) {
+    $query = db_select('watchdog', 'w')
+      ->condition('w.timestamp', $thisMorning, '>')
+      ->condition('w.severity', $severities, 'IN')
+      ->fields('w', array('wid'));
+
+    $logs[$status] = $query->countQuery()->execute()->fetchField();
+  }
+  
+  return $logs;
 }
