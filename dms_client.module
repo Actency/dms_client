@@ -1,4 +1,5 @@
 <?php
+
 /**
  * Implements hook_menu().
  */
@@ -7,7 +8,16 @@ function dms_client_menu() {
   $items['admin/reports/dms'] = array(
     'title' => 'DMS Report',
     'page callback' => 'dms_client_report_callback',
-    'access callback' => TRUE
+    'access callback' => 'dms_client_access_callback'
+  );
+
+  // Actions
+  $items['dms/action/%/execute'] = array(
+    'title' => 'Execute an action',
+    'page callback' => 'dms_client_action_callback',
+    'page arguments' => array(2),
+    'access callback' => 'dms_client_access_callback',
+    'type' => MENU_CALLBACK
   );
 
   // Module settings
@@ -18,56 +28,52 @@ function dms_client_menu() {
     'file' => 'dms_client.inc',
     'access callback' => TRUE
   );
-  // Actions
-  $items['dms-action/cron-run'] = array(
-    'title' => 'CRON run from dms call',
-    'page callback' => 'dms_client_cron_run',
-    'access callback' => TRUE,
-    'type' => MENU_CALLBACK
-  );
-  $items['dms-action/cache-clear'] = array(
-    'title' => 'Cache clear from dms call',
-    'page callback' => 'dms_client_cache_clear',
-    'access callback' => TRUE,
-    'type' => MENU_CALLBACK
-  );
+
   return $items;
 }
 
 /**
- * Menu callback
+ * Menu access callback.
+ */
+function dms_client_access_callback() {
+  return dms_client_valid_request(drupal_get_query_parameters());
+}
+
+/**
+ * Menu callback for reports.
  */
 function dms_client_report_callback() {
-  $response = array(
-    'code' => -1
-  );
-  // Request analysis
+  $response = array();
+
+  // Get request parameters.
   $params = drupal_get_query_parameters();
-  $req_valid = dms_client_valid_request($params);
+
   // Available modes (default: 'light')
   $arr_modes = array('light', 'full', 'specific');
   $req_mode = 'light';
   if (array_key_exists('mode', $params) && in_array($params['mode'], $arr_modes)) {
     $req_mode = $params['mode'];
   }
-  if ($req_valid) {
-    $response['code'] = 1;
-    $response['system_status'] = dms_client_system_status($req_mode == 'light');
-    if ($req_mode == 'full' || in_array('updates', $params['checklist'])) {
-      $response['updates'] = dms_client_updates_status();
-    }
-    if ($req_mode == 'full' || in_array('features', $params['checklist'])) {
-      $response['features'] = dms_client_features_status();
-    }
-    if ($req_mode == 'full' || in_array('statistics', $params['checklist'])) {
-      $response['statistics'] = dms_client_statistics();
-    }
-    if ($req_mode == 'full' || in_array('hack', $params['checklist'])) {
-      $response['hack'] = dms_client_hack_check();
-    }
-    if ($req_mode == 'full' || in_array('logs', $params['checklist'])) {
-      $response['logs'] = dms_client_logs_check();
-    }
+
+  $response['code'] = 1;
+  $response['system_status'] = dms_client_system_status($req_mode == 'light');
+  if ($req_mode == 'full' || in_array('updates', $params['checklist'])) {
+    $response['updates'] = dms_client_updates_status();
+  }
+  if ($req_mode == 'full' || in_array('features', $params['checklist'])) {
+    $response['features'] = dms_client_features_status();
+  }
+  if ($req_mode == 'full' || in_array('statistics', $params['checklist'])) {
+    $response['statistics'] = dms_client_statistics();
+  }
+  if ($req_mode == 'full' || in_array('hack', $params['checklist'])) {
+    $response['hack'] = dms_client_hack_check();
+  }
+  if ($req_mode == 'full' || in_array('logs', $params['checklist'])) {
+    $response['logs'] = dms_client_logs_check();
+  }
+  if ($req_mode == 'full' || in_array('server', $params['checklist'])) {
+    $response['server'] = dms_client_server_check();
   }
 
   // Call every module that implement hook_dms_get_report() to populate the output.
@@ -77,39 +83,66 @@ function dms_client_report_callback() {
     $function($response);
   }
 
-  drupal_add_http_header('Content-Type', 'application/json');
-  drupal_add_http_header('Access-Control-Allow-Origin', "*");
-  drupal_add_http_header('Access-Control-Allow-Methods', 'GET,POST');
-  echo json_encode($response);
+  // Return JSON data.
+  dms_client_send_json($response);
 }
 
 /**
- * Menu callback
+ * Menu callback for actions.
  */
-function dms_client_cron_run() {
-  return array(
-    'code' => drupal_cron_run() ? 1 : -1
-  );
-}
+function dms_client_action_callback($action) {
+  $response = array();
 
-/**
- * Menu callback
- */
-function dms_client_cache_clear() {
-  return array(
-    'code' => drupal_flush_all_caches() ? 1 : -1
-  );
+  // Execute action.
+  switch ($action) {
+    case 'uli':
+      $admin = user_load(1);
+      $response['code'] = !is_null($admin) ? 1 : -1;
+      $response['result'] = url(user_pass_reset_url($admin) . '/login');
+      break;
+    case 'cron-run':
+      $response['code'] = drupal_cron_run() ? 1 : -1;
+      break;
+    case 'cache-clear':
+      $response['code'] = drupal_flush_all_caches() ? 1 : -1;
+      break;
+  }
+
+  // Call every module that implement hook_dms_action() to populate the output.
+  // We do not use module_invoke_all() to be able to use variable by reference.
+  foreach (module_implements('dms_action') as $module) {
+    $function = $module . 'dms_action';
+    $function($action, $response);
+  }
+
+  // Return JSON data.
+  dms_client_send_json($response);
 }
 
 /**
  * Menu callback
  *
- * @param $params
+ * @param array $params
  *   Query parameters
+ *
+ * @return bool
  */
-function dms_client_valid_request($params) {
+function dms_client_valid_request(array $params) {
   // If php >= 5.5 we can use password_verify()
   return (array_key_exists('secret', $params) && dms_client_password_verify(variable_get('dms_client_secret', dms_client_generateRandomString()), $params['secret'])) ? TRUE : FALSE;
+}
+
+/**
+ * Helper to send JSON data.
+ *
+ * @param array $data
+ */
+function dms_client_send_json(array $data) {
+  drupal_add_http_header('Content-Type', 'application/json');
+  drupal_add_http_header('Access-Control-Allow-Origin', "*");
+  drupal_add_http_header('Access-Control-Allow-Methods', 'GET,POST');
+  echo json_encode($data);
+  exit;
 }
 
 /**
@@ -384,7 +417,6 @@ function dms_client_hack_check() {
   return $hack;
 }
 
-
 /**
  * Logs status (daily counter by severity)
  */
@@ -408,4 +440,34 @@ function dms_client_logs_check() {
   }
   
   return $logs;
+}
+
+/**
+ * Server information.
+ */
+function dms_client_server_check() {
+  $server = array();
+
+  $path = drupal_get_path('module', 'dms_client') . '/scripts/serverinfo.sh';
+  if (file_exists($path) && is_readable($path)) {
+    $output = '';
+
+    // Execute the script.
+    exec($path, $output);
+
+    // Decode the JSON.
+    $json = json_decode($output);
+    if (is_null($json)) {
+      watchdog('dms_client', 'JSON error : %error', array('%error' => json_last_error_msg()), WATCHDOG_ERROR);
+    } else {
+      $server = $json;
+    }
+
+    // @TODO remove this once script is fixed. Fixture test values...
+    $server = json_decode('{"hostname": "Deb7prs-DEV8", "distrib": "debian 7.9", "uptime": "2d, 3h, 49m, 47s", "cpusnumber": 3, "cpuusage": "2.2 %", "loadavg": "0.25", "memoryusage": "1925 / 3022 MB", "diskusage": ["12 / 38 GB", "12 / 38 GB"], "ips": ["192.168.20.27", "172.17.42.1"]}');
+  } else {
+    watchdog('dms_client', 'Check that your script located at %position is readable.', array('%position' => $path), WATCHDOG_ERROR);
+  }
+
+  return $server;
 }
