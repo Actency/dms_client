@@ -98,13 +98,16 @@ function dms_client_action_callback($action) {
     case 'uli':
       $admin = user_load(1);
       $response['code'] = !is_null($admin) ? 1 : -1;
-      $response['result'] = url(user_pass_reset_url($admin) . '/login');
+      $response['result'] = ' <a href="'.url(user_pass_reset_url($admin) . '/login').'">Click to login as an administrator</a>';
       break;
     case 'cron-run':
       $response['code'] = drupal_cron_run() ? 1 : -1;
+      $response['result'] = 'Cron was executed successfully';
       break;
     case 'cache-clear':
-      $response['code'] = drupal_flush_all_caches() ? 1 : -1;
+      drupal_flush_all_caches();
+      $response['code'] = 1;
+      $response['result'] = 'All caches were flushed successfully';
       break;
   }
 
