@@ -465,9 +465,6 @@ function dms_client_server_check() {
     } else {
       $server = $json;
     }
-
-    // @TODO remove this once script is fixed. Fixture test values...
-    $server = json_decode('{"hostname": "Deb7prs-DEV8", "distrib": "debian 7.9", "uptime": "2d, 3h, 49m, 47s", "cpusnumber": 3, "cpuusage": "2.2 %", "loadavg": "0.25", "memoryusage": "1925 / 3022 MB", "diskusage": ["12 / 38 GB", "12 / 38 GB"], "ips": ["192.168.20.27", "172.17.42.1"]}');
   } else {
     watchdog('dms_client', 'Check that your script located at %position is readable.', array('%position' => $path), WATCHDOG_ERROR);
   }
