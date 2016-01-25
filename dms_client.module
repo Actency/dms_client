@@ -8,6 +8,13 @@ define('DMS_MODE_SPECIFIC', 'specific');
  * Implements hook_menu().
  */
 function dms_client_menu() {
+  // Module status.
+  $items['dms/status'] = array(
+    'title' => 'DMS Status',
+    'page callback' => 'dms_client_status_callback',
+    'access callback' => TRUE,
+  );
+
   // Report generation.
   $items['dms/report/generate'] = array(
     'title' => 'DMS Report Generation',
@@ -62,6 +69,32 @@ function dms_client_access_callback() {
       'error' => 'Not allowed to access the DMS API. Check your access tokens.'
     ));
   }
+}
+
+/**
+ * Unprotected menu callback to check if
+ * module is well configured and working.
+ *
+ * @return string
+ *   The JSON data.
+ */
+function dms_client_status_callback() {
+  // Check if the module is well configured.
+  $working = dms_client_valid_request();
+  if ($working) {
+    $response = array(
+      'code' => 200,
+      'result' => 'DMS is working properly.'
+    );
+  } else {
+    $response = array(
+      'code' => 403,
+      'result' => 'Access not allowed. Please, check access token in DMS and in the Drupal client.'
+    );
+  }
+
+  // Return JSON data.
+  dms_client_send_json($response);
 }
 
 /**
