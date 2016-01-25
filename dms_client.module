@@ -87,6 +87,7 @@ function dms_client_status_callback() {
       'result' => 'DMS is working properly.'
     );
   } else {
+    drupal_add_http_header('Status', '403 Not Allowed');
     $response = array(
       'code' => 403,
       'result' => 'Access not allowed. Please, check access token in DMS and in the Drupal client.'
@@ -441,9 +442,7 @@ function dms_client_valid_request() {
  *   The token.
  */
 function dms_client_get_token() {
-  $token = variable_get('dms_client_secret', dms_client_generate_token());
-  $secret = crypt($token, $token);
-  return $secret;
+  return variable_get('dms_client_secret', dms_client_generate_token());
 }
 
 /**
