@@ -1,26 +1,46 @@
 <?php
 
+define('DMS_MODE_LIGHT', 'light');
+define('DMS_MODE_FULL', 'full');
+define('DMS_MODE_SPECIFIC', 'specific');
+
 /**
  * Implements hook_menu().
  */
 function dms_client_menu() {
-  // Report page
-  $items['admin/reports/dms'] = array(
-    'title' => 'DMS Report',
-    'page callback' => 'dms_client_report_callback',
-    'access callback' => 'dms_client_access_callback'
+  // Report generation.
+  $items['dms/report/generate'] = array(
+    'title' => 'DMS Report Generation',
+    'page callback' => 'dms_client_report_generate_callback',
+    'access callback' => TRUE,
   );
 
-  // Actions
+  // Report generation documentation.
+  $items['dms/report/describe'] = array(
+    'title' => 'DMS Report Description',
+    'page callback' => 'dms_client_report_describe_callback',
+    'access callback' => TRUE,
+  );
+
+  // Action execution.
   $items['dms/action/%/execute'] = array(
-    'title' => 'Execute an action',
-    'page callback' => 'dms_client_action_callback',
+    'title' => 'DMS Action Execution',
+    'page callback' => 'dms_client_action_execute_callback',
     'page arguments' => array(2),
-    'access callback' => 'dms_client_access_callback',
+    'access callback' => TRUE,
     'type' => MENU_CALLBACK
   );
 
-  // Module settings
+  // Action execution documentation.
+  $items['dms/action/describe'] = array(
+    'title' => 'DMS Action Execution Description',
+    'page callback' => 'dms_client_action_describe_callback',
+    'page arguments' => array(2),
+    'access callback' => TRUE,
+    'type' => MENU_CALLBACK
+  );
+
+  // Module settings.
   $items['admin/config/system/dms_client/settings'] = array(
     'title' => 'DMS Client Settings',
     'page callback' => 'drupal_get_form',
@@ -33,106 +53,364 @@ function dms_client_menu() {
 }
 
 /**
- * Menu access callback.
+ * Check access to the DMS client APIs.
  */
 function dms_client_access_callback() {
-  return dms_client_valid_request(drupal_get_query_parameters());
+  if(!dms_client_valid_request()) {
+    dms_client_send_json(array(
+      'code' => 403,
+      'error' => 'Not allowed to access the DMS API. Check your access tokens.'
+    ));
+  }
 }
 
 /**
- * Menu callback for reports.
+ * Menu callback for describing report available data.
+ *
+ * @return string
+ *   The JSON string of data.
  */
-function dms_client_report_callback() {
-  $response = array();
+function dms_client_report_describe_callback() {
+  // Check access before doing anything.
+  dms_client_access_callback();
 
+  // Get request parameters.
+  $response = array('code' => 200, 'data' => array());
+
+  // Display all modes information.
+  $modes = dms_client_report_modes();
+  foreach ($modes as $mode => $text) {
+    $response['data']['modes'][$mode] = $text;
+  }
+
+  // Display all tasks information.
+  $tasks = dms_client_report_tasks();
+  foreach ($tasks as $task => $task_data) {
+    $response['data']['tasks'][$task] = $task_data;
+  }
+
+  // Return JSON data.
+  dms_client_send_json($response);
+}
+
+/**
+ * Menu callback for describing available actions.
+ *
+ * @return string
+ *   The JSON string of data.
+ */
+function dms_client_action_describe_callback() {
+  // Check access before doing anything.
+  dms_client_access_callback();
+
+  // Get request parameters.
+  $response = array('code' => 200, 'data' => array());
+
+  // Display all modes information.
+  $actions = dms_client_actions();
+  foreach ($actions as $action => $action_data) {
+    $response['data']['actions'][$action] = $action_data;
+  }
+
+  // Return JSON data.
+  dms_client_send_json($response);
+}
+
+/**
+ * Menu callback for generating a report.
+ *
+ * @return string
+ *   The JSON string of data.
+ */
+function dms_client_report_generate_callback() {
+  // Check access before doing anything.
+  dms_client_access_callback();
+
+  // Get request parameters.
+  $response = array('code' => 200, 'data' => array());
+  $mode = dms_get_mode_from_request();
+  $checklist = dms_get_checklist_from_request($mode);
+
+  // Execute each tasks.
+  foreach ($checklist as $task) {
+    if (function_exists($task['callback'])) {
+      try {
+        // Execute the callback.
+        $start = microtime(true);
+        $response['data'][$task['key']]['result'] = $task['callback']();
+        $total = microtime(true) - $start;
+        $response['data'][$task['key']]['time'] = $total;
+        $response['data'][$task['key']]['code'] = 200;
+
+      } catch (\Exception $e) {
+        // Internal error response code.
+        $response['data'][$task['key']]['code'] = 500;
+        $response['data'][$task['key']]['error'] = $e->getMessage();
+      }
+    }
+  }
+
+  // Let other modules alter the response.
+  drupal_alter('dms_client_report', $response['data']);
+
+  // Return JSON data.
+  dms_client_send_json($response);
+}
+
+/**
+ * Menu callback for action execution.
+ *
+ * @param string $key
+ *   An action key to execute.
+ *
+ * @return string
+ *   The JSON data.
+ */
+function dms_client_action_execute_callback($key) {
+  // Check access before doing anything.
+  dms_client_access_callback();
+
+  // Get request parameters.
+  $response = array('code' => 200, 'data' => array());
+
+  // Execute the action.
+  $actions = dms_client_actions();
+  foreach ($actions as $action) {
+    if ($action['key'] == $key) {
+      if (function_exists($action['callback'])) {
+        try {
+          // Execute the action.
+          $start = microtime(true);
+          $response['data'][$action['key']]['result'] = $action['callback']();
+          $total = microtime(true) - $start;
+          $response['data'][$action['key']]['time'] = $total;
+          $response['data'][$action['key']]['code'] = 200;
+
+        } catch (\Exception $e) {
+          // Internal error response code.
+          $response['data'][$action['key']]['code'] = 500;
+          $response['data'][$action['key']]['error'] = $e->getMessage();
+        }
+      }
+    }
+  }
+
+  // Let other modules alter the response.
+  drupal_alter('dms_client_report', $response['data']);
+
+  // Return JSON data.
+  dms_client_send_json($response);
+}
+
+/**
+ * Get the mode to use from request.
+ *
+ * @return string
+ *   The mode to use : light, full, specific.
+ */
+function dms_get_mode_from_request() {
   // Get request parameters.
   $params = drupal_get_query_parameters();
 
   // Available modes (default: 'light')
-  $arr_modes = array('light', 'full', 'specific');
-  $req_mode = 'light';
-  if (array_key_exists('mode', $params) && in_array($params['mode'], $arr_modes)) {
-    $req_mode = $params['mode'];
+  $modes = array('light', 'full', 'specific');
+  $mode = 'light';
+  if (array_key_exists('mode', $params) && in_array($params['mode'], $modes)) {
+    $mode = $params['mode'];
   }
 
-  $response['code'] = 1;
-  $response['system_status'] = dms_client_system_status($req_mode == 'light');
-  if ($req_mode == 'full' || in_array('updates', $params['checklist'])) {
-    $response['updates'] = dms_client_updates_status();
-  }
-  if ($req_mode == 'full' || in_array('features', $params['checklist'])) {
-    $response['features'] = dms_client_features_status();
-  }
-  if ($req_mode == 'full' || in_array('statistics', $params['checklist'])) {
-    $response['statistics'] = dms_client_statistics();
-  }
-  if ($req_mode == 'full' || in_array('hack', $params['checklist'])) {
-    $response['hack'] = dms_client_hack_check();
-  }
-  if ($req_mode == 'full' || in_array('logs', $params['checklist'])) {
-    $response['logs'] = dms_client_logs_check();
-  }
-  if ($req_mode == 'full' || in_array('server', $params['checklist'])) {
-    $response['server'] = dms_client_server_check();
+  // If specifics are asked, auto change mode.
+  if (array_key_exists('specifics', $params)) {
+    $mode = 'specific';
   }
 
-  // Call every module that implement hook_dms_get_report() to populate the output.
-  // We do not use module_invoke_all() to be able to use variable by reference.
-  foreach (module_implements('dms_get_report') as $module) {
-    $function = $module . '_dms_get_report';
-    $function($response);
-  }
-
-  // Return JSON data.
-  dms_client_send_json($response);
+  return $mode;
 }
 
 /**
- * Menu callback for actions.
- */
-function dms_client_action_callback($action) {
-  $response = array();
-
-  // Execute action.
-  switch ($action) {
-    case 'uli':
-      $admin = user_load(1);
-      $response['code'] = !is_null($admin) ? 1 : -1;
-      $response['result'] = ' <a href="'.url(user_pass_reset_url($admin) . '/login').'">Click to login as an administrator</a>';
-      break;
-    case 'cron-run':
-      $response['code'] = drupal_cron_run() ? 1 : -1;
-      $response['result'] = 'Cron was executed successfully';
-      break;
-    case 'cache-clear':
-      drupal_flush_all_caches();
-      $response['code'] = 1;
-      $response['result'] = 'All caches were flushed successfully';
-      break;
-  }
-
-  // Call every module that implement hook_dms_action() to populate the output.
-  // We do not use module_invoke_all() to be able to use variable by reference.
-  foreach (module_implements('dms_action') as $module) {
-    $function = $module . 'dms_action';
-    $function($action, $response);
-  }
-
-  // Return JSON data.
-  dms_client_send_json($response);
-}
-
-/**
- * Menu callback
+ * Get the specific tasks to do from request.
  *
- * @param array $params
- *   Query parameters
+ * @return array
+ *   A list of tasks keys.
+ */
+function dms_get_specifics_from_request() {
+  $keys = array();
+
+  $params = drupal_get_query_parameters();
+  if (isset($params['specifics']) && !empty($params['specifics'])) {
+    if (is_array($params['specifics'])) {
+      $keys = $params['specifics'];
+    } elseif (strpos($params['specifics'], ',') !== FALSE) {
+      $keys = explode(',', $params['specifics']);
+    } else {
+      $keys = array($params['specifics']);
+    }
+  }
+
+  return $keys;
+}
+
+/**
+ * Get the checklist of tasks to do from the request.
+ *
+ * @param string $mode
+ *   The mode to use.
+ *
+ * @return array
+ *   The array of checklist of tasks.
+ */
+function dms_get_checklist_from_request($mode) {
+  $tasks = array();
+
+  $specifics = dms_get_specifics_from_request();
+  $all_tasks = dms_client_report_tasks();
+
+  // Filter by mode/specifics.
+  foreach ($all_tasks as $name => $task) {
+    if ($mode !== DMS_MODE_SPECIFIC && in_array($mode, $task['modes'])) {
+      // If task is enabled for given mode.
+      $tasks[$name] = $task;
+
+    } elseif ($mode === DMS_MODE_SPECIFIC && in_array($task['key'], $specifics)) {
+      // If task is explicitly asked.
+      $tasks[$name] = $task;
+    }
+  }
+
+  return $tasks;
+}
+
+/**
+ * Return all defined modes for generating reports.
+ *
+ * @return array
+ *   An array of modes.
+ */
+function dms_client_report_modes() {
+  $modes = array(
+    DMS_MODE_FULL => 'Full mode, all main tasks.',
+    DMS_MODE_LIGHT => 'Light mode, only a few tasks.',
+    DMS_MODE_SPECIFIC => 'Specific mode, you can choose which tasks to execute via the "specifics" query parameter.'
+  );
+
+  // Let other modules alter the list of modes.
+  drupal_alter('dms_client_report_modes', $modes);
+
+  return $modes;
+}
+
+/**
+ * Return all defined tasks for generating reports.
+ *
+ * @return array
+ *   An array of tasks.
+ */
+function dms_client_report_tasks() {
+  $tasks = array(
+    'check_status' => array(
+      'key' => 'system_status',
+      'modes' => array(DMS_MODE_FULL, DMS_MODE_LIGHT),
+      'callback' => 'dms_client_system_status'
+    ),
+    'check_updates' => array(
+      'key' => 'updates',
+      'modes' => array(DMS_MODE_FULL),
+      'callback' => 'dms_client_updates_status'
+    ),
+    'check_features' => array(
+      'key' => 'features',
+      'modes' => array(DMS_MODE_FULL),
+      'callback' => 'dms_client_features_status'
+    ),
+    'fetch_statistics' => array(
+      'key' => 'statistics',
+      'modes' => array(DMS_MODE_FULL),
+      'callback' => 'dms_client_statistics'
+    ),
+    'check_hacked' => array(
+      'key' => 'hack',
+      'modes' => array(DMS_MODE_FULL),
+      'callback' => 'dms_client_hack_check'
+    ),
+    'fetch_logs' => array(
+      'key' => 'logs',
+      'modes' => array(DMS_MODE_FULL),
+      'callback' => 'dms_client_logs_check'
+    ),
+    'fetch_server' => array(
+      'key' => 'server',
+      'modes' => array(DMS_MODE_FULL),
+      'callback' => 'dms_client_server_check'
+    ),
+  );
+
+  // Let other modules alter the list of tasks.
+  drupal_alter('dms_client_report_tasks', $tasks);
+
+  return $tasks;
+}
+
+/**
+ * Return all defined actions.
+ *
+ * @return array
+ *   An array of actions.
+ */
+function dms_client_actions() {
+  $actions = array(
+    'user_login' => array(
+      'key' => 'uli',
+      'callback' => 'dms_client_action_uli',
+      'description' => 'Login the user as administrator.',
+    ),
+    'cron_run' => array(
+      'key' => 'cron-run',
+      'callback' => 'dms_client_action_cron',
+      'description' => 'Run the Drupal CRON.',
+    ),
+    'cache_clear' => array(
+      'key' => 'cache-clear',
+      'callback' => 'dms_client_action_cache_clear',
+      'description' => 'Clear all Drupal caches.',
+    ),
+  );
+
+  // Let other modules alter the list of actions.
+  drupal_alter('dms_client_actions', $actions);
+
+  return $actions;
+}
+
+/**
+ * Check the access token for current request.
  *
  * @return bool
+ *   True if access is granted, False otherwise.
  */
-function dms_client_valid_request(array $params) {
-  // If php >= 5.5 we can use password_verify()
-  return (array_key_exists('secret', $params) && dms_client_password_verify(variable_get('dms_client_secret', dms_client_generateRandomString()), $params['secret'])) ? TRUE : FALSE;
+function dms_client_valid_request() {
+  // Check token is here.
+  $params = drupal_get_query_parameters();
+  if (!array_key_exists('secret', $params)) {
+    return FALSE;
+  }
+
+  // Get both server/client encoded tokens.
+  $server_token = $params['secret'];
+  $client_token = dms_client_get_token();
+
+  return $server_token == $client_token;
+}
+
+/**
+ * Get the current client token.
+ *
+ * @return string
+ *   The token.
+ */
+function dms_client_get_token() {
+  $token = variable_get('dms_client_secret', dms_client_generate_token());
+  $secret = crypt($token, $token);
+  return $secret;
 }
 
 /**
@@ -149,25 +427,15 @@ function dms_client_send_json(array $data) {
 }
 
 /**
- * Verify a secret
- *
- * @param $pass
- *   The clear secret
- * @param $hash
- *   The hash to match
- */
-function dms_client_password_verify($pass, $hash) {
-  $expected = crypt($pass, $pass);
-  return $expected == $hash;
-}
-
-/**
- * Generate a secret
+ * Generates a random token.
  *
  * @param $length
- *   The length of the generated secret
+ *   The length of the generated token.
+ *
+ * @return string
+ *   The random string.
  */
-function dms_client_generateRandomString($length = 255) {
+function dms_client_generate_token($length = 255) {
   $characters = '0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ';
   $randomString = '';
   for ($i = 0; $i < $length; $i++) {
@@ -176,13 +444,18 @@ function dms_client_generateRandomString($length = 255) {
   return $randomString;
 }
 
+/** * * * * * * * * *
+ * TASKS CALLBACKS. *
+ * * * * * * * * * **/
+
 /**
- * System status (see /modules/system/system.admin.inc)
+ * System status.
  *
- * @param $check
- *   If true, only returns a boolean whether there are system status errors.
+ * @see see modules/system/system.admin.inc
+ *
+ * @return array
  */
-function dms_client_system_status($check = FALSE) {
+function dms_client_system_status() {
   // Load .install files
   include_once DRUPAL_ROOT . '/includes/install.inc';
   drupal_load_updates();
@@ -191,23 +464,21 @@ function dms_client_system_status($check = FALSE) {
   $requirements = module_invoke_all('requirements', 'runtime');
   usort($requirements, '_system_sort_requirements');
 
-  if ($check) {
-    return drupal_requirements_severity($requirements) == REQUIREMENT_ERROR;
-  }
   return $requirements;
 }
 
 /**
- * Updates status (see /modules/update/update.manager.inc)
+ * Updates status.
  *
- * @param $check
- *   If true, only returns a boolean whether there are system status errors.
+ * @see modules/update/update.manager.inc
+ * @return array
+ * @throws \Exception
  */
-function dms_client_updates_status($check = FALSE) {
+function dms_client_updates_status() {
   module_load_include('module', 'update', 'update');
   $available = update_get_available(TRUE);
   if (empty($available)) {
-    return array('error' => t('There was a problem getting update information. Try again later.'));
+    throw new \Exception('There was a problem getting update information. Try again later.');
   }
 
   // This will be a nested array. The first key is the kind of project, which
@@ -302,11 +573,15 @@ function dms_client_updates_status($check = FALSE) {
 }
 
 /**
- * Features status (see /sites/all/modules/contrib/features/features.admin.inc)
+ * Features status.
+ *
+ * @see features/features.admin.inc
+ * @return array
+ * @throws \Exception
  */
 function dms_client_features_status() {
   if (!module_exists('features')) {
-    return array('error' => t('The features module is not enabled.'));
+    throw new \Exception('The features module is not enabled.');
   }
 
   module_load_include('inc', 'features', 'features.export');
@@ -358,7 +633,10 @@ function dms_client_features_status() {
 }
 
 /**
- * Statistics (users count, nodes count, lang, etc.)
+ * Statistics.
+ * For example, users count, nodes count, lang, etc.
+ *
+ * @return array
  */
 function dms_client_statistics() {
   // Lang
@@ -384,13 +662,17 @@ function dms_client_statistics() {
 }
 
 /**
- * Hack status (based on MD5check module)
+ * Check if modules are hacked with MD5check.
+ *
+ * @return array
+ * @throws \Exception
  */
 function dms_client_hack_check() {
   if (!module_exists('md5check')) {
-    return array('error' => t('The md5check module is not enabled.'));
+    throw new \Exception('The md5check module is not enabled.');
   }
-  $hack = array('code' => 1);
+
+  $hacked = array();
   // Fetches an array of all active modules and looping through them
   $modules = module_list(TRUE, FALSE);
   foreach ($modules as $moduleName) {
@@ -408,7 +690,7 @@ function dms_client_hack_check() {
       if ($module->md5check !== NULL) {
         if ($md5 != $module->md5check) {
           // The value has changed as in a files content has changed - we'll report this
-          $hack['modules'][] = $moduleName;
+          $hacked[] = $moduleName;
         }
       }
       else {
@@ -417,11 +699,16 @@ function dms_client_hack_check() {
       }
     }
   }
-  return $hack;
+
+  return $hacked;
 }
 
 /**
- * Logs status (daily counter by severity)
+ * Logs status (daily counter by severity).
+ *
+ * @TODO check if dblog disabled.
+ *
+ * @return array
  */
 function dms_client_logs_check() {
   $logs = array();
@@ -447,10 +734,12 @@ function dms_client_logs_check() {
 
 /**
  * Server information.
+ *
+ * @see scripts/serverinfo.sh
+ * @return array
+ * @throws \Exception
  */
 function dms_client_server_check() {
-  $server = array();
-
   $path = drupal_get_path('module', 'dms_client') . '/scripts/serverinfo.sh';
   if (file_exists($path) && is_readable($path)) {
     $output = '';
@@ -459,15 +748,58 @@ function dms_client_server_check() {
     exec($path, $output);
 
     // Decode the JSON.
-    $json = json_decode($output);
+    $json = json_decode(is_array($output) ? array_shift($output) : $output);
     if (is_null($json)) {
-      watchdog('dms_client', 'JSON error : %error', array('%error' => json_last_error_msg()), WATCHDOG_ERROR);
+      throw new \Exception('JSON error : ' . json_last_error_msg());
     } else {
       $server = $json;
     }
   } else {
-    watchdog('dms_client', 'Check that your script located at %position is readable.', array('%position' => $path), WATCHDOG_ERROR);
+    throw new \Exception('Check that your script located at ' . $path . ' is readable.');
   }
 
   return $server;
+}
+
+/** * * * * * * * * * *
+ * ACTIONS CALLBACKS. *
+ * * * * * * * * * * **/
+
+/**
+ * Action: login a user.
+ *
+ * @return array
+ * @throws \Exception
+ */
+function dms_client_action_uli() {
+  $admin = user_load(1);
+  if (!$admin) {
+    throw new \Exception('No admin user found.');
+  }
+
+  return array('message' => '<a href="' . url(user_pass_reset_url($admin) . '/login').'">Click to login as an administrator</a>');
+}
+
+/**
+ * Action: run the cron.
+ *
+ * @return array
+ * @throws \Exception
+ */
+function dms_client_action_cron() {
+  if (!drupal_cron_run()) {
+    throw new \Exception('Cron run failed.');
+  }
+
+  return array('message' => 'Cron was executed successfully');
+}
+
+/**
+ * Action: clear all caches.
+ *
+ * @return array
+ */
+function dms_client_action_cache_clear() {
+  drupal_flush_all_caches();
+  return array('message' => 'All caches were flushed successfully');
 }

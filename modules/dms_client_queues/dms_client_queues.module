@@ -1,26 +1,11 @@
 <?php
-/**
- * Implements hook_dms_get_report().
- */
-function dms_client_queues_dms_get_report(&$response) {
-  // Get all queues names and count.
-  $queues = db_query('SELECT name, COUNT(name) AS count FROM {queue} GROUP BY name');
-
-  // Add the queues to the response.
-  foreach ($queues as $queue) {
-    $response['queues'][$queue->name]['count'] = $queue->count;
-  }
-
-  /* @todo: process vbo and batch queues appart as they are special types of queues. */
-}
 
 /**
  * Implements hook_form_FORM_ID_alter().
+ *
+ * Add custom configurations to the DMS configuration page.
  */
 function dms_client_queues_form_dms_client_settings_form_alter(&$form, &$form_state, $form_id) {
-  //variable_set('queue_class_bportal_mapping_engine_force_match', 'MappingEngineQueue');
-
-  $form['#submit'][] = 'dms_client_queues_settings_form_submit';
   $form['dms_client_queues'] = array(
     '#type' => 'fieldset',
     '#title' => t('Queues'),
@@ -47,13 +32,15 @@ function dms_client_queues_form_dms_client_settings_form_alter(&$form, &$form_st
     '#options' => $options,
     '#default_value' => variable_get('dms_client_queues_classes_extended', array()),
   );
+
+  // Adds a custom submit handler.
+  $form['#submit'][] = 'dms_client_queues_settings_form_submit';
 }
 
 /**
- * DMS client queues settings form submit.
+ * Submit callback to handle queues settings.
  */
 function dms_client_queues_settings_form_submit($form, &$form_state) {
-  //drupal_set_message(print_r($form_state, TRUE));
   foreach ($form_state['values']['dms_client_queues_classes_extended'] as $key => $value) {
     $class = variable_get($key);
     drupal_set_message($value);
@@ -84,4 +71,42 @@ function dms_client_queues_settings_form_submit($form, &$form_state) {
       }
     }
   }
+}
+
+/**
+ * Implements hook_dms_client_report_tasks_alter().
+ *
+ * Adds some tasks to the report generation.
+ */
+function dms_client_queues_dms_client_report_tasks_alter(&$tasks) {
+  // Adds a queues checking.
+  $tasks['check_queues'] = array(
+    'key' => 'queues_status',
+    'modes' => array(DMS_MODE_FULL),
+    'callback' => 'dms_client_queues_status'
+  );
+}
+
+/** * * * * * * * * *
+ * TASKS CALLBACKS. *
+ * * * * * * * * * **/
+
+/**
+ * Send queues statistics.
+ *
+ * @return array
+ * @throws \Exception
+ */
+function dms_client_queues_status() {
+  $data = array();
+
+  // Get all queues names and count.
+  $queues = db_query('SELECT name, COUNT(name) AS count FROM {queue} GROUP BY name');
+
+  // Add the queues to the response.
+  foreach ($queues as $queue) {
+    $data[$queue->name]['count'] = $queue->count;
+  }
+
+  return $data;
 }
