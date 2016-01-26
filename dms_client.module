@@ -166,20 +166,20 @@ function dms_client_report_generate_callback() {
   $checklist = dms_get_checklist_from_request($mode);
 
   // Execute each tasks.
-  foreach ($checklist as $task) {
+  foreach ($checklist as $key => $task) {
     if (function_exists($task['callback'])) {
       try {
         // Execute the callback.
         $start = microtime(true);
-        $response['data'][$task['key']]['result'] = $task['callback']();
+        $response['data'][$key]['result'] = $task['callback']();
         $total = microtime(true) - $start;
-        $response['data'][$task['key']]['time'] = $total;
-        $response['data'][$task['key']]['code'] = 200;
+        $response['data'][$key]['time'] = $total;
+        $response['data'][$key]['code'] = 200;
 
       } catch (\Exception $e) {
         // Internal error response code.
-        $response['data'][$task['key']]['code'] = 500;
-        $response['data'][$task['key']]['error'] = $e->getMessage();
+        $response['data'][$key]['code'] = 500;
+        $response['data'][$key]['error'] = $e->getMessage();
       }
     }
   }
@@ -209,21 +209,21 @@ function dms_client_action_execute_callback($key) {
 
   // Execute the action.
   $actions = dms_client_actions();
-  foreach ($actions as $action) {
-    if ($action['key'] == $key) {
+  foreach ($actions as $action_key => $action) {
+    if ($action_key == $key) {
       if (function_exists($action['callback'])) {
         try {
           // Execute the action.
           $start = microtime(true);
-          $response['data'][$action['key']]['result'] = $action['callback']();
+          $response['data'][$action_key]['result'] = $action['callback']();
           $total = microtime(true) - $start;
-          $response['data'][$action['key']]['time'] = $total;
-          $response['data'][$action['key']]['code'] = 200;
+          $response['data'][$action_key]['time'] = $total;
+          $response['data'][$action_key]['code'] = 200;
 
         } catch (\Exception $e) {
           // Internal error response code.
-          $response['data'][$action['key']]['code'] = 500;
-          $response['data'][$action['key']]['error'] = $e->getMessage();
+          $response['data'][$action_key]['code'] = 500;
+          $response['data'][$action_key]['error'] = $e->getMessage();
         }
       }
     }
@@ -300,14 +300,14 @@ function dms_get_checklist_from_request($mode) {
   $all_tasks = dms_client_report_tasks();
 
   // Filter by mode/specifics.
-  foreach ($all_tasks as $name => $task) {
+  foreach ($all_tasks as $key => $task) {
     if ($mode !== DMS_MODE_SPECIFIC && in_array($mode, $task['modes'])) {
       // If task is enabled for given mode.
-      $tasks[$name] = $task;
+      $tasks[$key] = $task;
 
-    } elseif ($mode === DMS_MODE_SPECIFIC && in_array($task['key'], $specifics)) {
+    } elseif ($mode === DMS_MODE_SPECIFIC && in_array($key, $specifics)) {
       // If task is explicitly asked.
-      $tasks[$name] = $task;
+      $tasks[$key] = $task;
     }
   }
 
@@ -341,38 +341,31 @@ function dms_client_report_modes() {
  */
 function dms_client_report_tasks() {
   $tasks = array(
-    'check_status' => array(
-      'key' => 'system_status',
+    'system_status' => array(
       'modes' => array(DMS_MODE_FULL, DMS_MODE_LIGHT),
       'callback' => 'dms_client_system_status'
     ),
-    'check_updates' => array(
-      'key' => 'updates',
+    'updates' => array(
       'modes' => array(DMS_MODE_FULL),
       'callback' => 'dms_client_updates_status'
     ),
-    'check_features' => array(
-      'key' => 'features',
+    'features' => array(
       'modes' => array(DMS_MODE_FULL),
       'callback' => 'dms_client_features_status'
     ),
-    'fetch_statistics' => array(
-      'key' => 'statistics',
+    'statistics' => array(
       'modes' => array(DMS_MODE_FULL),
       'callback' => 'dms_client_statistics'
     ),
-    'check_hacked' => array(
-      'key' => 'hack',
+    'hack' => array(
       'modes' => array(DMS_MODE_FULL),
       'callback' => 'dms_client_hack_check'
     ),
-    'fetch_logs' => array(
-      'key' => 'logs',
+    'logs' => array(
       'modes' => array(DMS_MODE_FULL),
       'callback' => 'dms_client_logs_check'
     ),
-    'fetch_server' => array(
-      'key' => 'server',
+    'server' => array(
       'modes' => array(DMS_MODE_FULL),
       'callback' => 'dms_client_server_check'
     ),
@@ -392,20 +385,20 @@ function dms_client_report_tasks() {
  */
 function dms_client_actions() {
   $actions = array(
-    'user_login' => array(
-      'key' => 'uli',
+    'uli' => array(
       'callback' => 'dms_client_action_uli',
       'description' => 'Login the user as administrator.',
+      'title' => 'Login'
     ),
     'cron_run' => array(
-      'key' => 'cron-run',
       'callback' => 'dms_client_action_cron',
       'description' => 'Run the Drupal CRON.',
+      'title' => 'Run CRON'
     ),
     'cache_clear' => array(
-      'key' => 'cache-clear',
       'callback' => 'dms_client_action_cache_clear',
       'description' => 'Clear all Drupal caches.',
+      'title' => 'Clear cache'
     ),
   );
 
