@@ -865,7 +865,12 @@ function dms_client_server_check() {
     // Decode the JSON.
     $json = json_decode(is_array($output) ? array_shift($output) : $output);
     if (is_null($json)) {
-      throw new \Exception('JSON error : ' . json_last_error_msg());
+      $message = json_last_error();
+      if (function_exists('json_last_error_msg')) {
+        $message = json_last_error_msg();
+      }
+
+      throw new \Exception('JSON error : ' . $message . ' : ' . $output);
     } else {
       $server = $json;
     }
