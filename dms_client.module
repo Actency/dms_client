@@ -35,16 +35,21 @@ function dms_client_menu() {
     'page callback' => 'dms_client_action_execute_callback',
     'page arguments' => array(2),
     'access callback' => TRUE,
-    'type' => MENU_CALLBACK
   );
 
   // Action execution documentation.
   $items['dms/action/describe'] = array(
     'title' => 'DMS Action Execution Description',
     'page callback' => 'dms_client_action_describe_callback',
+    'access callback' => TRUE,
+  );
+
+  // Special path to allow download of private files.
+  $items['dms/download/%'] = array(
+    'title' => 'DMS Download Execution',
+    'page callback' => 'dms_client_download_callback',
     'page arguments' => array(2),
     'access callback' => TRUE,
-    'type' => MENU_CALLBACK
   );
 
   // Module settings.
@@ -53,7 +58,7 @@ function dms_client_menu() {
     'page callback' => 'drupal_get_form',
     'page arguments' => array('dms_client_settings_form'),
     'file' => 'dms_client.inc',
-    'access callback' => TRUE
+    'access callback' => TRUE,
   );
 
   return $items;
@@ -237,6 +242,80 @@ function dms_client_action_execute_callback($key) {
 }
 
 /**
+ * Menu callback for downloads.
+ *
+ * @param string $path
+ *   A path to a file to download, encoded in base64.
+ */
+function dms_client_download_callback($path) {
+  // Check access before doing anything.
+  dms_client_access_callback();
+
+  // Decode the path.
+  $path = base64_decode($path);
+
+  // Check if file exists and is allowed.
+  if (!file_exists($path) || !dms_client_download_allowed($path)) {
+    drupal_not_found();
+  }
+
+  // Send HTTP headers.
+  $file = pathinfo($path);
+  drupal_add_http_header('Content-Type', 'application/octet-stream');
+  drupal_add_http_header('Content-Length', filesize($path));
+  drupal_add_http_header('Content-Disposition', 'attachment; filename="' . $file['basename'] . '"');
+  drupal_send_headers();
+
+  // Transfer file in 1024 byte chunks to save memory usage.
+  if ($fd = fopen($path, 'rb')) {
+    while (!feof($fd)) {
+      print fread($fd, 1024);
+    }
+    fclose($fd);
+  }
+
+  drupal_exit();
+}
+
+/**
+ * Check if a download is allowed.
+ *
+ * @param string $path
+ *   A path to a file to download.
+ *
+ * @return boolean
+ *   True if allowed, False otherwise.
+ */
+function dms_client_download_allowed($path) {
+  $allowed = array(
+    drupal_get_path('module', 'dms_client') . '/dumps/database.gz'
+  );
+
+  // Let other modules alter the list of allowed files.
+  drupal_alter('dms_client_report_modes', $allowed, $path);
+
+  return in_array($path, $allowed);
+}
+
+/**
+ * Return the URL to a downloadable file.
+ *
+ * @param string $path
+ *   A path to a file to download.
+ *
+ * @return string|FALSE
+ *   The URL to access the file, False if not allowed.
+ */
+function dms_client_download_get_url($path) {
+  if (!dms_client_download_allowed($path)) {
+    return FALSE;
+  }
+
+  // Return the generated URL.
+  return url('dms/download/' . base64_encode($path), array('query' => drupal_get_query_parameters(), 'absolute' => TRUE));
+}
+
+/**
  * Get the mode to use from request.
  *
  * @return string
@@ -399,6 +478,11 @@ function dms_client_actions() {
       'callback' => 'dms_client_action_cache_clear',
       'description' => 'Clear all Drupal caches.',
       'title' => 'Clear cache'
+    ),
+    'dump_db' => array(
+      'callback' => 'dms_client_action_dump_db',
+      'description' => 'Dump the website database.',
+      'title' => 'Dump DB'
     ),
   );
 
@@ -833,4 +917,37 @@ function dms_client_action_cron() {
 function dms_client_action_cache_clear() {
   drupal_flush_all_caches();
   return array('message' => 'All caches were flushed successfully');
+}
+
+/**
+ * Action: dump database.
+ *
+ * @return array
+ * @throws \Exception
+ */
+function dms_client_action_dump_db() {
+  global $databases;
+
+  // Increase the maximum execution time.
+  if (!ini_get('safe_mode') && strpos(ini_get('disable_functions'), 'set_time_limit') === FALSE && ini_get('max_execution_time') < 1200) {
+    set_time_limit(1200);
+  }
+
+  // Set paths.
+  $dump_path = drupal_get_path('module', 'dms_client') . '/dumps/database.gz';
+  if (file_exists($dump_path)) unlink($dump_path);
+
+  // Use the default database.
+  $default_db = $databases['default']['default'];
+
+  // Dump the database.
+  exec('mysqldump -p' . $default_db['password'] . ' --user=' . $default_db['username'] . ' --host=' . $default_db['host'] . ' --compact ' . $default_db['database'] . ' | gzip > ' . $dump_path);
+
+  // Prepare and send back the download link.
+  $url = dms_client_download_get_url($dump_path);
+  if ($url === FALSE) {
+    throw new \Exception('URL to download the dump can not be generated.');
+  }
+
+  return array('message' => '<a href="' . $url . '">Click to download database dump</a>');
 }
