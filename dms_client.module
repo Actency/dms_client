@@ -184,7 +184,7 @@ function dms_client_report_generate_callback() {
       } catch (\Exception $e) {
         // Internal error response code.
         $response['data'][$key]['code'] = 500;
-        $response['data'][$key]['error'] = $e->getMessage();
+        $response['data'][$key]['error'] = 'DMS Client : ' . $e->getMessage();
       }
     }
   }
@@ -228,7 +228,7 @@ function dms_client_action_execute_callback($key) {
         } catch (\Exception $e) {
           // Internal error response code.
           $response['data'][$action_key]['code'] = 500;
-          $response['data'][$action_key]['error'] = $e->getMessage();
+          $response['data'][$action_key]['error'] = 'DMS Client : ' . $e->getMessage();
         }
       }
     }
@@ -861,18 +861,20 @@ function dms_client_server_check() {
 
     // Execute the script.
     exec($path, $output);
+    if (is_array($output)) {
+      $output = array_shift($output);
+    }
+
+    // Check that output is not null.
+    if (is_null($output) || strlen($output) == 0) {
+      throw new \Exception('Check that your script located at ' . $path . ' is executable.');
+    }
 
     // Decode the JSON.
-    $json = json_decode(is_array($output) ? array_shift($output) : $output);
-    if (is_null($json)) {
-      $message = json_last_error();
-      if (function_exists('json_last_error_msg')) {
-        $message = json_last_error_msg();
-      }
-
-      throw new \Exception('JSON error : ' . $message . ' : ' . $output);
-    } else {
-      $server = $json;
+    $server = json_decode($output);
+    if (is_null($server)) {
+      $message = function_exists('json_last_error_msg') ? json_last_error_msg() : json_last_error();
+      throw new \Exception('JSON parse error : ' . $message);
     }
   } else {
     throw new \Exception('Check that your script located at ' . $path . ' is readable.');
