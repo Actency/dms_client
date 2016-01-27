@@ -100,7 +100,7 @@ function dms_client_status_callback() {
     $response = array(
       'code' => 403,
       'data' => array(
-        'message' => 'Access not allowed. Please, check access token in DMS and in the Drupal client.',
+        'message' => 'Access not allowed. Please, check access token and allowed IPs.',
         'version' => DMS_VERSION
       )
     );
@@ -512,11 +512,12 @@ function dms_client_valid_request() {
     return FALSE;
   }
 
-  // Get both server/client encoded tokens.
+  // Check tokens & IP.
   $server_token = $params['secret'];
   $client_token = dms_client_get_token();
+  $current_ip = ip_address();
 
-  return $server_token == $client_token;
+  return ($server_token == $client_token) && dms_client_check_ip($current_ip);
 }
 
 /**
@@ -527,6 +528,31 @@ function dms_client_valid_request() {
  */
 function dms_client_get_token() {
   return variable_get('dms_client_secret', dms_client_generate_token());
+}
+
+/**
+ * Check the current request IP is allowed.
+ *
+ * @param string $ip
+ *   The IP to check.
+ *
+ * @return boolean
+ *   True if IP is allowed, False otherwise.
+ */
+function dms_client_check_ip($ip) {
+  // Bypass if developer mode.
+  if (variable_get('dms_client_dev_mode', FALSE)) {
+    return TRUE;
+  }
+
+  // Check if IP is allowed.
+  $allowed = variable_get('dms_client_allowed_ips', '');
+  if (strlen($allowed) > 0) {
+    $allowed = explode("\n", str_replace("\r", '', $allowed));
+    return in_array($ip, $allowed);
+  }
+
+  return FALSE;
 }
 
 /**
