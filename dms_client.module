@@ -72,7 +72,7 @@ function dms_client_access_callback() {
   if(!dms_client_valid_request()) {
     dms_client_send_json(array(
       'code' => 403,
-      'error' => 'Not allowed to access the DMS API. Check your access tokens.'
+      'error' => 'Not allowed to access the DMS API.'
     ));
   }
 }
