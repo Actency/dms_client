@@ -333,7 +333,7 @@ function dms_get_mode_from_request() {
   $params = drupal_get_query_parameters();
 
   // Available modes (default: 'light')
-  $modes = array('light', 'full', 'specific');
+  $modes = dms_client_report_modes();
   $mode = 'light';
   if (array_key_exists('mode', $params) && in_array($params['mode'], $modes)) {
     $mode = $params['mode'];
