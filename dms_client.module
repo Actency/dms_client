@@ -335,7 +335,7 @@ function dms_get_mode_from_request() {
   // Available modes (default: 'light')
   $modes = dms_client_report_modes();
   $mode = 'light';
-  if (array_key_exists('mode', $params) && in_array($params['mode'], $modes)) {
+  if (array_key_exists('mode', $params) && array_key_exists($params['mode'], $modes)) {
     $mode = $params['mode'];
   }
 
